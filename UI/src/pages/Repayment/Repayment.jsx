@@ -9,37 +9,27 @@ import {
   Th,
   Thead,
   Tr,
-  IconButton,
-  useDisclosure,
-  useBreakpointValue,
-  Modal,
-  ModalOverlay,
-  ModalContent,
-  ModalHeader,
-  ModalBody,
-  ModalCloseButton,
-  ModalFooter,
-  FormControl,
-  FormLabel,
-  FormErrorMessage,
-  Stack,
   Card,
   CardHeader,
   CardBody,
-  useToast,
-  Tooltip,
-  Spinner,
   Text,
-  HStack,
-  Select,
+  Spinner,
   SimpleGrid,
+  FormControl,
+  FormLabel,
+  FormErrorMessage,
+  Select,
+  HStack,
+  Tooltip,
+  IconButton,
+  useToast,
 } from "@chakra-ui/react";
 import { FiPrinter } from "react-icons/fi";
 import { useState, useEffect } from "react";
-import { showToast } from "../../utils/toast"; // optional, you can use toast directly
+import dayjs from "dayjs";
+import { showToast } from "../../utils/toast";
 
 const Repayment = () => {
-  const { isOpen, onOpen, onClose } = useDisclosure();
   const toast = useToast();
 
   const [formData, setFormData] = useState({
@@ -54,68 +44,94 @@ const Repayment = () => {
   });
 
   const [errors, setErrors] = useState({});
-  const [services, setServices] = useState([]);
+  const [records, setRecords] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [searchDate, setSearchDate] = useState(dayjs().format("YYYY-MM-DD"));
   const itemsPerPage = 10;
-  const [serviceCount, setServiceCount] = useState([]);
-  const [selectedService, setSelectedService] = useState(null);
-  const [searchdate, setSearchDate] = useState();
-  const [loading, setLoading] = useState(false);
-  const isMobile = useBreakpointValue({ base: true, md: false });
 
-  // Responsive modal size
-  const modalSize = useBreakpointValue({ base: "full", md: "xl" });
+  // Fetch repayment records
+  const fetchRecords = async (page = 1, date = "") => {
+    setLoading(true);
+    try {
+      const url = new URL(`${import.meta.env.VITE_API_BASE_URL}/get_service`);
+      url.searchParams.append("page", page);
+      url.searchParams.append("limit", itemsPerPage);
+      if (date) url.searchParams.append("date", date);
+
+      const response = await fetch(url.toString());
+      const json = await response.json();
+
+      if (response.ok) {
+        const formatted = json.data.map((item, index) => ({
+          id: item.service_id || index + 1,
+          loanNo: item.service_no,
+          customerName: item.cus_name,
+          mobileNumber: item.mob_no,
+          address: item.mob_model,
+          due_amount: item.issue_details,
+          pay_amount: item.status,
+          pending_amount: "—",
+          date: item.received_date
+            ? new Date(item.received_date).toLocaleDateString("en-IN")
+            : "N/A",
+        }));
+        setRecords(formatted);
+        setCurrentPage(json.currentPage);
+        setTotalPages(json.totalPages);
+      } else {
+        console.error("Failed to fetch repayment data");
+      }
+    } catch (error) {
+      console.error("Fetch repayment error:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    fetchServiceCount();
-    fetchServices();
-  }, []);
-
-  useEffect(() => {
-    // Recalculate pending whenever due_amount or pay_amount changes
-    const due = parseFloat(formData.due_amount) || 0;
-    const pay = parseFloat(formData.pay_amount) || 0;
-    const pending = Math.max(0, parseFloat((due - pay).toFixed(2)));
-    setFormData((prev) => ({ ...prev, pending_amount: pending }));
-  }, [formData.due_amount, formData.pay_amount]);
+    fetchRecords(currentPage);
+  }, [currentPage]);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
+    let cleanedValue = value;
 
-    // allow only numbers for amount fields (but let user type decimals)
-    if ((name === "due_amount" || name === "pay_amount") && value !== "") {
-      // replace invalid chars except digits and dot
-      const cleaned = value.replace(/[^\d.]/g, "");
-      setFormData((prev) => ({ ...prev, [name]: cleaned }));
-    } else if (name === "mobileNumber") {
-      // allow only digits (max 10)
-      const cleaned = value.replace(/\D/g, "").slice(0, 10);
-      setFormData((prev) => ({ ...prev, [name]: cleaned }));
-    } else {
-      setFormData((prev) => ({ ...prev, [name]: value }));
+    if (name === "mobileNumber") {
+      cleanedValue = value.replace(/\D/g, "").slice(0, 10);
     }
 
-    // clear the field error while typing
-    setErrors((prev) => ({ ...prev, [name]: "" }));
+    if (["due_amount", "pay_amount"].includes(name)) {
+      cleanedValue = value.replace(/[^\d.]/g, "");
+    }
+
+    setFormData({ ...formData, [name]: cleanedValue });
+    setErrors({ ...errors, [name]: "" });
   };
+
+  useEffect(() => {
+    const due = parseFloat(formData.due_amount) || 0;
+    const pay = parseFloat(formData.pay_amount) || 0;
+    const pending = Math.max(0, (due - pay).toFixed(2));
+    setFormData((prev) => ({ ...prev, pending_amount: pending }));
+  }, [formData.due_amount, formData.pay_amount]);
 
   const validateForm = () => {
     const newErrors = {};
 
-    if (!formData.loanNo?.toString().trim()) newErrors.loanNo = "Enter loan number";
-    if (!formData.customerName?.trim()) newErrors.customerName = "Enter customer name";
-    if (!formData.mobileNumber?.trim()) newErrors.mobileNumber = "Enter mobile number";
-    else if (formData.mobileNumber.length !== 10) newErrors.mobileNumber = "Mobile must be 10 digits";
-    if (!formData.address?.trim()) newErrors.address = "Enter address";
-
-    const due = parseFloat(formData.due_amount);
-    if (isNaN(due) || due <= 0) newErrors.due_amount = "Enter due amount greater than 0";
-
-    const pay = parseFloat(formData.pay_amount);
-    if (isNaN(pay) || pay < 0) newErrors.pay_amount = "Enter valid payment amount";
-    if (!isNaN(due) && !isNaN(pay) && pay > due) newErrors.pay_amount = "Payment cannot exceed due amount";
-
+    if (!formData.loanNo.trim()) newErrors.loanNo = "Enter loan number";
+    if (!formData.customerName.trim())
+      newErrors.customerName = "Enter customer name";
+    if (!formData.mobileNumber.trim())
+      newErrors.mobileNumber = "Enter mobile number";
+    else if (formData.mobileNumber.length !== 10)
+      newErrors.mobileNumber = "Mobile number must be 10 digits";
+    if (!formData.address.trim()) newErrors.address = "Enter address";
+    if (!formData.due_amount || parseFloat(formData.due_amount) <= 0)
+      newErrors.due_amount = "Enter valid due amount";
+    if (!formData.pay_amount || parseFloat(formData.pay_amount) < 0)
+      newErrors.pay_amount = "Enter valid payment amount";
     if (!formData.due_date) newErrors.due_date = "Select due date";
 
     setErrors(newErrors);
@@ -123,50 +139,44 @@ const Repayment = () => {
   };
 
   const handlePay = async () => {
-    try {
-      if (!validateForm()) {
-        toast({
-          title: "Validation Error",
-          description: "Please fix the highlighted fields.",
-          status: "error",
-          duration: 3000,
-          isClosable: true,
-        });
-        return;
-      }
-
-      // Prepare payload for API
-      const payload = {
-        loan_no: formData.loanNo,
-        cus_name: formData.customerName,
-        mobile: formData.mobileNumber,
-        address: formData.address,
-        due_amount: parseFloat(formData.due_amount),
-        pay_amount: parseFloat(formData.pay_amount) || 0,
-        pending_amount: parseFloat(formData.pending_amount),
-        due_date: formData.due_date,
-      };
-
-      setLoading(true);
-
-      // Example API call - adjust endpoint as necessary
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/repayment`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+    if (!validateForm()) {
+      showToast({
+        title: "Validation Error",
+        description: "Please fix the highlighted fields.",
+        status: "error",
       });
+      return;
+    }
+
+    const payload = {
+      loan_no: formData.loanNo,
+      cus_name: formData.customerName,
+      mobile: formData.mobileNumber,
+      address: formData.address,
+      due_amount: parseFloat(formData.due_amount),
+      pay_amount: parseFloat(formData.pay_amount),
+      pending_amount: parseFloat(formData.pending_amount),
+      due_date: formData.due_date,
+    };
+
+    setLoading(true);
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_BASE_URL}/repayment`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }
+      );
 
       const data = await response.json();
       if (response.ok) {
-        toast({
+        showToast({
           title: "Payment Saved",
           description: data.message || "Repayment recorded successfully.",
           status: "success",
-          duration: 3000,
-          isClosable: true,
         });
-
-        // reset form
         setFormData({
           loanNo: "",
           customerName: "",
@@ -177,216 +187,168 @@ const Repayment = () => {
           pending_amount: 0,
           due_date: "",
         });
-
-        // Refresh list
-        fetchServices(currentPage);
-        fetchServiceCount();
+        fetchRecords(currentPage);
       } else {
-        toast({
+        showToast({
           title: "Save Failed",
           description: data.message || "Failed to save repayment.",
           status: "error",
-          duration: 3000,
-          isClosable: true,
         });
       }
     } catch (err) {
-      console.error("Pay error:", err);
-      toast({
+      showToast({
         title: "Error",
-        description: err.message || "Something went wrong",
+        description: err.message,
         status: "error",
-        duration: 3000,
-        isClosable: true,
       });
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchServices = async (page = 1, date = "") => {
-    setLoading(true);
-    try {
-      const url = new URL(`${import.meta.env.VITE_API_BASE_URL}/get_service`);
-      url.searchParams.append("page", page);
-      url.searchParams.append("limit", itemsPerPage);
-      if (date) url.searchParams.append("date", date);
-
-      const response = await fetch(url.toString());
-      const json = await response.json();
-      if (response.ok) {
-        const formatted = json.data.map((item, index) => ({
-          id: item.service_id || index + 1,
-          service_id: item.service_id,
-          serviceNo: item.service_no,
-          customerName: item.cus_name,
-          mobileModel: item.mob_model,
-          mobileNumber: item.mob_no,
-          issue: item.issue_details,
-          status: item.status,
-          date: item.received_date ? new Date(item.received_date).toLocaleDateString("en-IN") : "N/A",
-        }));
-        setServices(formatted);
-        setCurrentPage(json.currentPage);
-        setTotalPages(json.totalPages);
-      } else {
-        console.error("Failed to fetch services");
-      }
-    } catch (error) {
-      console.error("Fetch services error:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchServices(currentPage);
-  }, [currentPage]);
-
-  const fetchServiceCount = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch(`${import.meta.env.VITE_API_BASE_URL}/get_service_count`);
-      const data = await response.json();
-      if (response.ok) {
-        setServiceCount(data);
-      } else {
-        console.error("Failed to fetch service count");
-      }
-    } catch (error) {
-      console.error("Fetch service count error:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Handy small helper to fill form from selected table row (optional)
-  const handleEdit = (serviceId) => {
-    const svc = services.find((s) => s.service_id === serviceId);
-    if (!svc) return;
-    setFormData((prev) => ({
-      ...prev,
-      loanNo: svc.serviceNo,
-      customerName: svc.customerName,
-      mobileNumber: svc.mobileNumber,
-      address: svc.issue || prev.address,
-      due_amount: prev.due_amount || "",
-      due_date: prev.due_date || "",
-    }));
-    onOpen();
+  const handlePrint = (id) => {
+    console.log("Print ID:", id);
   };
 
   return (
-    <Box overflow="hidden">
-      {/* Page Header */}
-      <Flex className="page-header" align="center" justify="space-between" mb={4}>
-        <Text className="page-title" fontSize={{ base: "lg", md: "xl" }} fontWeight="600">
-          Repayment
-        </Text>
-      </Flex>
+    <>
+      {loading && (
+        <Box className="loading-overlay">
+          <Spinner size="xl" color="#625DF0" thickness="4px" />
+          <Text className="loading-text">
+            Retrieving records, please wait...
+          </Text>
+        </Box>
+      )}
 
-      {/* Repayment Input Box */}
-      <Card bg="white" borderRadius="lg" p={4} mb={6} boxShadow="sm">
-        <CardBody>
-          <SimpleGrid columns={{ base: 1, sm: 2, md: 4 }} spacing={4}>
-            <FormControl isInvalid={!!errors.loanNo}>
+      <Box overflow="hidden">
+        {/* HEADER */}
+        <Flex className="page-header">
+          <Text className="page-title">Repayment</Text>
+        </Flex>
+
+        {/* INPUT FORM */}
+        <Card className="table-card" p={6} mb={8}>
+          <SimpleGrid columns={{ base: 1, md: 4 }} spacing={4}>
+            <FormControl isInvalid={errors.loanNo}>
               <FormLabel>Loan No</FormLabel>
               <Input
                 name="loanNo"
                 placeholder="Enter loan no"
                 value={formData.loanNo}
                 onChange={handleInputChange}
-                size="sm"
+                className="input-primary"
               />
-              {errors.loanNo && <FormErrorMessage>{errors.loanNo}</FormErrorMessage>}
+              {errors.loanNo && (
+                <FormErrorMessage>{errors.loanNo}</FormErrorMessage>
+              )}
             </FormControl>
 
-            <FormControl isInvalid={!!errors.mobileNumber}>
+            <FormControl isInvalid={errors.mobileNumber}>
               <FormLabel>Mobile</FormLabel>
               <Input
                 name="mobileNumber"
                 placeholder="Enter mobile no"
                 value={formData.mobileNumber}
                 onChange={handleInputChange}
-                size="sm"
-                inputMode="numeric"
+                className="input-primary"
               />
-              {errors.mobileNumber && <FormErrorMessage>{errors.mobileNumber}</FormErrorMessage>}
+              {errors.mobileNumber && (
+                <FormErrorMessage>{errors.mobileNumber}</FormErrorMessage>
+              )}
             </FormControl>
 
-            <FormControl isInvalid={!!errors.address}>
+            <FormControl isInvalid={errors.address}>
               <FormLabel>Area / Address</FormLabel>
               <Select
                 name="address"
                 placeholder="Select area"
                 value={formData.address}
                 onChange={handleInputChange}
-                size="sm"
+                className="input-primary"
               >
                 <option value="Thanjavur">Thanjavur</option>
                 <option value="Trichy">Trichy</option>
                 <option value="Ariyalur">Ariyalur</option>
               </Select>
-              {errors.address && <FormErrorMessage>{errors.address}</FormErrorMessage>}
+              {errors.address && (
+                <FormErrorMessage>{errors.address}</FormErrorMessage>
+              )}
             </FormControl>
 
-            <FormControl isInvalid={!!errors.customerName}>
+            <FormControl isInvalid={errors.customerName}>
               <FormLabel>Customer Name</FormLabel>
               <Input
                 name="customerName"
-                placeholder="Enter customer"
+                placeholder="Enter customer name"
                 value={formData.customerName}
                 onChange={handleInputChange}
-                size="sm"
+                className="input-primary"
               />
-              {errors.customerName && <FormErrorMessage>{errors.customerName}</FormErrorMessage>}
+              {errors.customerName && (
+                <FormErrorMessage>{errors.customerName}</FormErrorMessage>
+              )}
             </FormControl>
 
-            <FormControl isInvalid={!!errors.due_amount}>
+            <FormControl isInvalid={errors.due_amount}>
               <FormLabel>Due Amount</FormLabel>
               <Input
                 name="due_amount"
-                placeholder="Due amount"
+                placeholder="Enter due amount"
                 value={formData.due_amount}
                 onChange={handleInputChange}
-                size="sm"
-                inputMode="decimal"
+                className="input-primary"
               />
-              {errors.due_amount && <FormErrorMessage>{errors.due_amount}</FormErrorMessage>}
+              {errors.due_amount && (
+                <FormErrorMessage>{errors.due_amount}</FormErrorMessage>
+              )}
             </FormControl>
 
-            <FormControl isInvalid={!!errors.due_date}>
-              <FormLabel>Due Date</FormLabel>
-              <Input name="due_date" type="date" value={formData.due_date} onChange={handleInputChange} size="sm" />
-              {errors.due_date && <FormErrorMessage>{errors.due_date}</FormErrorMessage>}
-            </FormControl>
-
-            <FormControl isInvalid={!!errors.pay_amount}>
+            <FormControl isInvalid={errors.pay_amount}>
               <FormLabel>Pay Amount</FormLabel>
               <Input
                 name="pay_amount"
-                placeholder="Enter payment"
+                placeholder="Enter pay amount"
                 value={formData.pay_amount}
                 onChange={handleInputChange}
-                size="sm"
-                inputMode="decimal"
+                className="input-primary"
               />
-              {errors.pay_amount && <FormErrorMessage>{errors.pay_amount}</FormErrorMessage>}
+              {errors.pay_amount && (
+                <FormErrorMessage>{errors.pay_amount}</FormErrorMessage>
+              )}
             </FormControl>
 
-            <FormControl>
-              <FormLabel>Balance / Pending</FormLabel>
-              <Input name="pending_amount" value={formData.pending_amount} readOnly size="sm" bg="gray.50" />
+            <FormControl isInvalid={errors.pending_amount}>
+              <FormLabel>Pending</FormLabel>
+              <Input
+                name="pending_amount"
+                value={formData.pending_amount}
+                readOnly
+                className="input-primary"
+              />
+            </FormControl>
+
+            <FormControl isInvalid={errors.due_date}>
+              <FormLabel>Due Date</FormLabel>
+              <Input
+                name="due_date"
+                type="date"
+                value={formData.due_date}
+                onChange={handleInputChange}
+                className="input-primary"
+              />
+              {errors.due_date && (
+                <FormErrorMessage>{errors.due_date}</FormErrorMessage>
+              )}
             </FormControl>
           </SimpleGrid>
 
-          {/* Buttons */}
-          <Flex mt={4} justify="flex-end" gap={3}>
+          <Flex mt={6} justify="flex-end" gap={3}>
             <Button
-              variant="outline"
-              colorScheme="gray"
+              variant="ghost"
+              className="btn-cancel"
               size="sm"
-              onClick={() => {
+              onClick={() =>
                 setFormData({
                   loanNo: "",
                   customerName: "",
@@ -396,211 +358,152 @@ const Repayment = () => {
                   pay_amount: "",
                   pending_amount: 0,
                   due_date: "",
-                });
-                setErrors({});
-              }}
+                })
+              }
             >
               Cancel
             </Button>
-            <Button colorScheme="purple" size="sm" onClick={handlePay} isLoading={loading}>
+            <Button className="btn-primary" size="sm" onClick={handlePay}>
               Pay
             </Button>
           </Flex>
-        </CardBody>
-      </Card>
+        </Card>
 
-      {/* Services / Repayment History */}
-      <Card className="table-card">
-        <CardHeader display="flex" justifyContent="space-between" alignItems="center" px={4} py={3}>
-          <Text color={"black"} fontWeight={"500"}>
-            Repayment History
-          </Text>
+        {/* TABLE */}
+        <Card className="table-card">
+          <CardHeader className="page-header">
+            <Text color="black" fontWeight="500">
+              Repayment History
+            </Text>
 
-          <Input
-            type="date"
-            size="sm"
-            width={{ base: "100%", md: "200px" }}
-            onChange={(e) => {
-              const selected = e.target.value;
-              setSearchDate(selected);
-              setCurrentPage(1);
-              fetchServices(1, selected);
-            }}
-          />
-        </CardHeader>
+            <Input
+              type="date"
+              size="sm"
+              className="input-primary input-small"
+              onChange={(e) => {
+                const selected = e.target.value;
+                setSearchDate(selected);
+                setCurrentPage(1);
+                fetchRecords(1, selected);
+              }}
+            />
+          </CardHeader>
 
-        <CardBody px={0}>
-          {loading ? (
-            <Flex justify="center" align="center" minH="200px">
-              <Spinner size="xl" color="#625DF0" thickness="4px" />
-            </Flex>
-          ) : (
-            <>
-              <Box className="table-scroll">
-                {isMobile ? (
-                  // ------------------ MOBILE CARD VIEW ------------------
-                  <Stack spacing={4} px={3}>
-                    {services.map((service) => (
-                      <Box key={service.id} p={4} borderWidth="1px" borderRadius="lg" boxShadow="sm" bg="white">
-                        <Text fontWeight="bold" fontSize="md">
-                          Loan No: {service.serviceNo}
-                        </Text>
-
-                        <Text fontSize="sm" mt={1}>
-                          <b>Customer:</b> {service.customerName}
-                        </Text>
-                        <Text fontSize="sm">
-                          <b>Mobile:</b> {service.mobileNumber}
-                        </Text>
-                        <Text fontSize="sm">
-                          <b>Area:</b> {service.mobileModel}
-                        </Text>
-                        <Text fontSize="sm">
-                          <b>Due Amount:</b> {service.issue}
-                        </Text>
-                        <Text fontSize="sm">
-                          <b>Status:</b> {service.status}
-                        </Text>
-                        <Text fontSize="sm">
-                          <b>Date:</b> {service.date}
-                        </Text>
-
-                        {/* ACTION BUTTONS */}
-                        <Flex mt={3} justify="flex-end">
-                          <Tooltip label="Print" bg="#625DF0" color="white">
-                            <IconButton
-                              icon={<FiPrinter />}
-                              aria-label="Print"
-                              size="sm"
-                              colorScheme="purple"
-                              onClick={() => handlePrint(service.service_id)}
-                            />
-                          </Tooltip>
-                        </Flex>
-                      </Box>
-                    ))}
-
-                    {services.length === 0 && (
-                      <Text textAlign="center" color="gray.500">
-                        No records found
-                      </Text>
-                    )}
-                  </Stack>
-                ) : (
-                  // ------------------ DESKTOP TABLE VIEW ------------------
+          <CardBody px={0}>
+            {loading ? (
+              <Flex justify="center" align="center" minH="200px">
+                <Spinner size="xl" color="#625DF0" thickness="4px" />
+              </Flex>
+            ) : (
+              <>
+                <Box className="table-scroll">
                   <Table className="table" size="sm">
                     <Thead>
                       <Tr>
-                        <Th>Loan no</Th>
+                        <Th>Loan No</Th>
                         <Th>Customer</Th>
                         <Th>Mobile</Th>
                         <Th>Area</Th>
                         <Th>Due Amount</Th>
-                        <Th>Paid Amount</Th>
-                        <Th>Pending Amount</Th>
+                        <Th>Pay Amount</Th>
+                        <Th>Pending</Th>
                         <Th>Date</Th>
-                        <Th>Action</Th>
+                        <Th textAlign="center">Action</Th>
                       </Tr>
                     </Thead>
 
                     <Tbody>
-                      {services.map((service) => (
-                        <Tr key={service.id}>
-                          <Td>{service.serviceNo}</Td>
-                          <Td>{service.customerName}</Td>
-                          <Td>{service.mobileNumber}</Td>
-                          <Td>{service.mobileModel}</Td>
-                          <Td>{service.issue}</Td>
-                          <Td>{service.status}</Td>
-                          <Td>{service.date}</Td>
-                          <Td>
+                      {records.map((item) => (
+                        <Tr key={item.id}>
+                          <Td>{item.loanNo}</Td>
+                          <Td>{item.customerName}</Td>
+                          <Td>{item.mobileNumber}</Td>
+                          <Td>{item.address}</Td>
+                          <Td>{item.due_amount}</Td>
+                          <Td>{item.pay_amount}</Td>
+                          <Td>{item.pending_amount}</Td>
+                          <Td>{item.date}</Td>
+                          <Td textAlign="center">
                             <Tooltip label="Print" bg="#625DF0" color="white">
                               <IconButton
                                 icon={<FiPrinter />}
                                 aria-label="Print"
                                 size="sm"
                                 className="table-action-btn view"
-                                onClick={() => handlePrint(service.service_id)}
-                              />
-                            </Tooltip>
-                          </Td>
-                          <Td>
-                            <Tooltip label="Print" bg="#625DF0" color="white">
-                              <IconButton
-                                icon={<FiPrinter />}
-                                aria-label="Print"
-                                size="sm"
-                                colorScheme="purple"
-                                onClick={() => handlePrint(service.service_id)}
+                                onClick={() => handlePrint(item.id)}
                               />
                             </Tooltip>
                           </Td>
                         </Tr>
                       ))}
 
-                      {services.length === 0 && (
+                      {records.length === 0 && (
                         <Tr>
-                          <Td colSpan="9" textAlign="center" color="#666">
-                            No recent services found
+                          <Td colSpan={9} textAlign="center" color="#666">
+                            No repayment records found
                           </Td>
                         </Tr>
                       )}
                     </Tbody>
                   </Table>
-                )}
-              </Box>
+                </Box>
 
-              {/* Pagination Footer */}
-              <Flex className="pagination-footer" px={4} py={3} align="center" justify="space-between">
-                <Text className="pagination-text">Showing {services.length} items</Text>
+                {/* PAGINATION */}
+                <Flex className="pagination-footer">
+                  <Text className="pagination-text">
+                    Showing {records.length} items
+                  </Text>
 
-                <HStack spacing={2}>
-                  <Button
-                    size="xs"
-                    className="pagination-btn"
-                    onClick={() => {
-                      const newPage = Math.max(currentPage - 1, 1);
-                      setCurrentPage(newPage);
-                      fetchServices(newPage, searchdate);
-                    }}
-                    isDisabled={currentPage === 1}
-                  >
-                    Prev
-                  </Button>
-
-                  {Array.from({ length: totalPages }, (_, i) => (
+                  <HStack spacing={2}>
                     <Button
-                      key={i}
                       size="xs"
-                      className={`pagination-btn ${currentPage === i + 1 ? "active" : ""}`}
+                      className="pagination-btn"
                       onClick={() => {
-                        setCurrentPage(i + 1);
-                        fetchServices(i + 1, searchdate);
+                        const newPage = Math.max(currentPage - 1, 1);
+                        setCurrentPage(newPage);
+                        fetchRecords(newPage, searchDate);
                       }}
+                      isDisabled={currentPage === 1}
                     >
-                      {i + 1}
+                      Prev
                     </Button>
-                  ))}
 
-                  <Button
-                    size="xs"
-                    className="pagination-btn"
-                    onClick={() => {
-                      const newPage = Math.min(currentPage + 1, totalPages);
-                      setCurrentPage(newPage);
-                      fetchServices(newPage, searchdate);
-                    }}
-                    isDisabled={currentPage === totalPages}
-                  >
-                    Next
-                  </Button>
-                </HStack>
-              </Flex>
-            </>
-          )}
-        </CardBody>
-      </Card>
-    </Box>
+                    {Array.from({ length: totalPages }, (_, i) => (
+                      <Button
+                        key={i}
+                        size="xs"
+                        className={`pagination-btn ${
+                          currentPage === i + 1 ? "active" : ""
+                        }`}
+                        onClick={() => {
+                          setCurrentPage(i + 1);
+                          fetchRecords(i + 1, searchDate);
+                        }}
+                      >
+                        {i + 1}
+                      </Button>
+                    ))}
+
+                    <Button
+                      size="xs"
+                      className="pagination-btn"
+                      onClick={() => {
+                        const newPage = Math.min(currentPage + 1, totalPages);
+                        setCurrentPage(newPage);
+                        fetchRecords(newPage, searchDate);
+                      }}
+                      isDisabled={currentPage === totalPages}
+                    >
+                      Next
+                    </Button>
+                  </HStack>
+                </Flex>
+              </>
+            )}
+          </CardBody>
+        </Card>
+      </Box>
+    </>
   );
 };
 
